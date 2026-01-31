@@ -19,4 +19,39 @@ Consult Docker's [getting started](https://docs.docker.com/go/get-started-sharin
 docs for more detail on building and pushing.
 
 ### References
-* [Docker's Node.js guide](https://docs.docker.com/language/nodejs/)
+
+- [Docker's Node.js guide](https://docs.docker.com/language/nodejs/)
+
+docker build --target production --tag docker-nodejs-sample .
+docker images
+
+Inside the docker-nodejs-sample directory, run the following command in a terminal.
+docker compose up app-dev --build
+The development application will start with both servers:
+
+API Server: http://localhost:3000 - Express.js backend with REST API
+Frontend: http://localhost:5173 - Vite dev server with React frontend
+Health Check: http://localhost:3000/health - Application health status
+
+Run the application in the background
+You can run the application detached from the terminal by adding the -d option. Inside the docker-nodejs-sample directory, run the following command in a terminal.
+
+docker compose up app-dev --build -d
+
+To confirm that the container is running, use docker ps command:
+docker ps
+
+Run different profiles
+You can run different configurations using Docker Compose profiles:
+
+Run production
+docker compose up app-prod -d
+
+Run tests
+docker compose up app-test -d
+
+To stop the application, run:
+
+docker compose down
+
+docker compose up app-dev --build

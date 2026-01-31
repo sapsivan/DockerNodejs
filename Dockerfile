@@ -1,72 +1,140 @@
-# syntax=docker/dockerfile:1
-
-# Comments are provided throughout this file to help you get started.
-# If you need more help, visit the Dockerfile reference guide at
-# https://docs.docker.com/go/dockerfile-reference/
-
-# Want to help us make this template better? Share your feedback here: https://forms.gle/ybq9Krt8jtBL3iCk7
+# ========================================
+# Optimized Multi-Stage Dockerfile
+# Node.js TypeScript Application
+# ========================================
 
 ARG NODE_VERSION=24.11.1-alpine
+FROM node:${NODE_VERSION} AS base
 
-################################################################################
-# Use node image for base image for all stages.
-FROM node:${NODE_VERSION}-alpine as base
+# Set working directory
+WORKDIR /app
 
-# Set working directory for all build stages.
-WORKDIR /usr/src/app
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 -G nodejs && \
+    chown -R nodejs:nodejs /app
 
+# ========================================
+# Dependencies Stage
+# ========================================
+FROM base AS deps
 
-################################################################################
-# Create a stage for installing production dependecies.
-FROM base as deps
+# Copy package files
+COPY package*.json ./
 
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /root/.npm to speed up subsequent builds.
-# Leverage bind mounts to package.json and package-lock.json to avoid having to copy them
-# into this layer.
-RUN --mount=type=bind,source=package.json,target=package.json \
-    --mount=type=bind,source=package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
+# Install production dependencies
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --omit=dev && \
+    npm cache clean --force
 
-################################################################################
-# Create a stage for building the application.
-FROM deps as build
+# Set proper ownership
+RUN chown -R nodejs:nodejs /app
 
-# Download additional development dependencies before building, as some projects require
-# "devDependencies" to be installed to build. If you don't need this, remove this step.
-RUN --mount=type=bind,source=package.json,target=package.json \
-    --mount=type=bind,source=package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci
+# ========================================
+# Build Dependencies Stage
+# ========================================
+FROM base AS build-deps
 
-# Copy the rest of the source files into the image.
-COPY . .
-# Run the build script.
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies with build optimizations
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --no-audit --no-fund && \
+    npm cache clean --force
+
+# Create necessary directories and set permissions
+RUN mkdir -p /app/node_modules/.vite && \
+    chown -R nodejs:nodejs /app
+
+# ========================================
+# Build Stage
+# ========================================
+FROM build-deps AS build
+
+# Copy only necessary files for building (respects .dockerignore)
+COPY --chown=nodejs:nodejs . .
+
+# Build the application
 RUN npm run build
 
-################################################################################
-# Create a new stage to run the application with minimal runtime dependencies
-# where the necessary files are copied from the build stage.
-FROM base as final
+# Set proper ownership
+RUN chown -R nodejs:nodejs /app
 
-# Use production node environment by default.
-ENV NODE_ENV production
+# ========================================
+# Development Stage
+# ========================================
+FROM build-deps AS development
 
-# Run the application as a non-root user.
-USER node
+# Set environment
+ENV NODE_ENV=development \
+    NPM_CONFIG_LOGLEVEL=warn
 
-# Copy package.json so that package manager commands can be used.
-COPY package.json .
+# Copy source files
+COPY . .
 
-# Copy the production dependencies from the deps stage and also
-# the built application from the build stage into the image.
-COPY --from=deps /usr/src/app/node_modules ./node_modules
-COPY --from=build /usr/src/app/dist ./dist
+# Ensure all directories have proper permissions
+RUN mkdir -p /app/node_modules/.vite && \
+    chown -R nodejs:nodejs /app && \
+    chmod -R 755 /app
 
+# Switch to non-root user
+USER nodejs
 
-# Expose the port that the application listens on.
+# Expose ports
+EXPOSE 3000 5173 9229
+
+# Start development server
+CMD ["npm", "run", "dev:docker"]
+
+# ========================================
+# Production Stage
+# ========================================
+ARG NODE_VERSION=24.11.1-alpine
+FROM node:${NODE_VERSION} AS production
+
+# Set working directory
+WORKDIR /app
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 -G nodejs && \
+    chown -R nodejs:nodejs /app
+
+# Set optimized environment variables
+ENV NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=256 --no-warnings" \
+    NPM_CONFIG_LOGLEVEL=silent
+
+# Copy production dependencies from deps stage
+COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --from=deps --chown=nodejs:nodejs /app/package*.json ./
+# Copy built application from build stage
+COPY --from=build --chown=nodejs:nodejs /app/dist ./dist
+
+# Switch to non-root user for security
+USER nodejs
+
+# Expose port
 EXPOSE 3000
 
-# Run the application.
-CMD npm run dev
+# Start production server
+CMD ["node", "dist/server.js"]
+
+# ========================================
+# Test Stage
+# ========================================
+FROM build-deps AS test
+
+# Set environment
+ENV NODE_ENV=test \
+    CI=true
+
+# Copy source files
+COPY --chown=nodejs:nodejs . .
+
+# Switch to non-root user
+USER nodejs
+
+# Run tests with coverage
+CMD ["npm", "run", "test:coverage"]

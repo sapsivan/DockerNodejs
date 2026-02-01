@@ -55,3 +55,15 @@ To stop the application, run:
 docker compose down
 
 docker compose up app-dev --build
+
+https://hub.docker.com/repositories/sivanvtk
+
+docker tag local-image:tagname new-repo:tagname
+docker push new-repo:tagname
+
+https://hub.docker.com/repositories/sivanvtk/nodejssamples
+
+https://github.com/sapsivan/DockerNodejs
+
+$ git remote set-url origin https://github.com/{your-username}/{your-repository-name}.git
+$ git remote set-url origin https://github.com/sapsivan/DockerNodejs.git
